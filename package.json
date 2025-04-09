@@ -1,8 +1,8 @@
 {
-  "name": "@typewriter/delta",
+  "name": "@dabble/delta",
   "version": "1.2.4",
   "description": "Format for representing rich text documents and changes.",
-  "author": "Jason Chen <jhchen7@gmail.com>",
+  "author": "Jacob Wright <jacwright@gmail.com>",
   "homepage": "https://github.com/@dabble/delta",
   "type": "module",
   "main": "./dist/index.js",
@@ -38,7 +38,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git://github.com/typewriter-editor/delta.git"
+    "url": "git://github.com/dabblewriter/delta.git"
   },
   "keywords": [
     "rich text",
