@@ -52,6 +52,11 @@ export default class Delta {
   }
 
   push(newOp: Op): this {
+    // Normalize: strip empty attributes
+    if (newOp.attributes && Object.keys(newOp.attributes).length === 0) {
+      const { attributes, ...rest } = newOp;
+      newOp = rest;
+    }
     let index = this.ops.length;
     let lastOp = this.ops[index - 1];
     if (typeof lastOp === 'object') {
@@ -396,9 +401,4 @@ export default class Delta {
     }
     return index;
   }
-}
-
-if (typeof module === 'object') {
-  module.exports = Delta;
-  module.exports.default = Delta;
 }
