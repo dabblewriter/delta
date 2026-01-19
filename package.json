@@ -1,6 +1,6 @@
 {
   "name": "@dabble/delta",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "Format for representing rich text documents and changes.",
   "author": "Jacob Wright <jacwright@gmail.com>",
   "homepage": "https://github.com/@dabble/delta",
