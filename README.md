@@ -171,6 +171,8 @@ Creates a new Delta object.
 
 *Note: No validity/sanity check is performed when constructed with ops or delta. The new delta's internal ops array will also be assigned from ops or delta.ops without deep copying.*
 
+*Zero-length ops (`{ insert: '' }`, `{ retain: 0 }`, `{ delete: 0 }`) are kept as given. `push()` drops them, and `compose()`, `transform()`, `invert()`, `diff()` and `slice()` ignore them and never return them. Ops are shared by reference between deltas, so never mutate one in place.*
+
 #### Example
 
 ```js

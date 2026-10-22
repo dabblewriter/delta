@@ -28,6 +28,10 @@ namespace Op {
 
 export default Op;
 
+export function isEmpty(op: Op): boolean {
+  return typeof op.insert === 'string' ? op.insert.length === 0 : op.retain === 0 || op.delete === 0;
+}
+
 export class OpIterator {
   ops: Op[];
   index: number;
@@ -37,15 +41,16 @@ export class OpIterator {
     this.ops = ops;
     this.index = 0;
     this.offset = 0;
+    this.skipEmpty();
   }
 
   hasNext(): boolean {
     return !!this.peek();
   }
 
-  next(length?: number): Op {
-    if (!length) {
-      length = Infinity;
+  next(length = Infinity): Op {
+    if (length <= 0) {
+      return { retain: 0 };
     }
     const nextOp = this.ops[this.index];
     if (nextOp) {
@@ -55,6 +60,7 @@ export class OpIterator {
         length = opLength - offset;
         this.index += 1;
         this.offset = 0;
+        this.skipEmpty();
       } else {
         this.offset += length;
       }
@@ -112,15 +118,21 @@ export class OpIterator {
     if (!this.hasNext()) {
       return [];
     } else if (this.offset === 0) {
-      return this.ops.slice(this.index);
+      return this.ops.slice(this.index).filter(op => !isEmpty(op));
     } else {
       const offset = this.offset;
       const index = this.index;
       const next = this.next();
-      const rest = this.ops.slice(this.index);
+      const rest = this.ops.slice(this.index).filter(op => !isEmpty(op));
       this.offset = offset;
       this.index = index;
       return [next].concat(rest);
+    }
+  }
+
+  private skipEmpty() {
+    while (this.index < this.ops.length && isEmpty(this.ops[this.index])) {
+      this.index += 1;
     }
   }
 }
