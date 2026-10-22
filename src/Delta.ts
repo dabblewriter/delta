@@ -1,6 +1,6 @@
 import diff from 'fast-diff';
 import AttributeMap from './AttributeMap.js';
-import Op from './Op.js';
+import Op, { isEmpty } from './Op.js';
 import isEqual from './util/isEqual.js';
 
 const NULL_CHARACTER = String.fromCharCode(0); // Placeholder char for embed in diff()
@@ -51,7 +51,14 @@ export default class Delta {
     return this.push(newOp);
   }
 
+  /**
+   * Zero-length ops are dropped. Others are stored by reference, and `slice`, `compose`, `concat` and the
+   * iterator hand out ops from their inputs, so never mutate an op after pushing it.
+   */
   push(newOp: Op): this {
+    if (isEmpty(newOp)) {
+      return this;
+    }
     // Normalize: strip empty attributes
     if (newOp.attributes && Object.keys(newOp.attributes).length === 0) {
       const { attributes, ...rest } = newOp;
