@@ -37,9 +37,9 @@ const noLength = fc.oneof(badNumber, fc.constant(null as unknown as number));
 const junk = fc.oneof(
   fc.record({ insert: fc.constant(''), attributes }, { requiredKeys: ['insert'] }),
   fc.record({ retain: noLength, attributes: formats }, { requiredKeys: ['retain'] }),
-  fc.record({ delete: noLength }),
+  fc.record({ delete: fc.oneof(noLength, fc.constant(Infinity)) }),
   fc.record({ insert: text, retain: badNumber }),
-  fc.record({ insert: text, delete: badNumber })
+  fc.record({ insert: text, delete: fc.oneof(badNumber, fc.constant(Infinity)) })
 );
 
 // The same raw ops twice: with junk scattered through, and without it
@@ -199,6 +199,7 @@ describe('a malformed op', () => {
     ['an insert with a negative retain', { insert: 'x', retain: -1 }],
     ['a NaN retain after JSON', JSON.parse(JSON.stringify({ retain: NaN }))],
     ['a fractional retain', { retain: 0.5 }],
+    ['an Infinity delete after JSON', JSON.parse('{"delete":1e400}')],
   ])('is skipped by compose() and transform(): %s', (_, op) => {
     const change = new Delta([{ retain: 1 }, op, { delete: 1 }]);
     expect(doc.compose(change)).toEqual(new Delta([{ insert: 'ac' }]));

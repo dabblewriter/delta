@@ -17,13 +17,14 @@ namespace Op {
 
   /**
    * Returns 0 for an op with no valid length: an empty insert, or a retain or delete that is not a whole number
-   * above zero (NaN, null, negative or fractional). Every reader skips such an op.
+   * above zero (NaN, null, negative, fractional, or an Infinity delete). Every reader skips such an op.
    */
   export function length(op: Op): number {
     if (op.delete != null) {
       return validLength(op.delete);
     } else if (op.retain != null) {
-      return validLength(op.retain);
+      // The iterator uses `{ retain: Infinity }` for the rest of the document
+      return op.retain === Infinity ? Infinity : validLength(op.retain);
     } else if (typeof op.insert === 'string') {
       return op.insert.length;
     } else {
@@ -38,9 +39,8 @@ namespace Op {
 
 export default Op;
 
-// Infinity stays valid: the iterator uses `{ retain: Infinity }` for the rest of the document
-function validLength(n: unknown): number {
-  return typeof n === 'number' && n > 0 && (Number.isInteger(n) || n === Infinity) ? n : 0;
+function validLength(n: number): number {
+  return Number.isInteger(n) && n > 0 ? n : 0;
 }
 
 export function withoutEmpty(ops: Op[]): Op[] {
