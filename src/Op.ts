@@ -24,12 +24,16 @@ namespace Op {
       return typeof op.insert === 'string' ? op.insert.length : 1;
     }
   }
+
+  export function isEmpty(op: Op): boolean {
+    return typeof op.insert === 'string' ? op.insert.length === 0 : !(Op.length(op) > 0);
+  }
 }
 
 export default Op;
 
-export function isEmpty(op: Op): boolean {
-  return typeof op.insert === 'string' ? op.insert.length === 0 : op.retain === 0 || op.delete === 0;
+export function withoutEmpty(ops: Op[]): Op[] {
+  return ops.some(Op.isEmpty) ? ops.filter(op => !Op.isEmpty(op)) : ops;
 }
 
 export class OpIterator {
@@ -48,8 +52,14 @@ export class OpIterator {
     return !!this.peek();
   }
 
-  next(length = Infinity): Op {
-    if (length <= 0) {
+  /**
+   * A missing or NaN length takes the rest of the current op. Zero or less takes nothing and returns
+   * `{ retain: 0 }`, which `push` drops.
+   */
+  next(length?: number): Op {
+    if (length == null || Number.isNaN(length)) {
+      length = Infinity;
+    } else if (length <= 0) {
       return { retain: 0 };
     }
     const nextOp = this.ops[this.index];
@@ -118,12 +128,12 @@ export class OpIterator {
     if (!this.hasNext()) {
       return [];
     } else if (this.offset === 0) {
-      return this.ops.slice(this.index).filter(op => !isEmpty(op));
+      return withoutEmpty(this.ops.slice(this.index));
     } else {
       const offset = this.offset;
       const index = this.index;
       const next = this.next();
-      const rest = this.ops.slice(this.index).filter(op => !isEmpty(op));
+      const rest = withoutEmpty(this.ops.slice(this.index));
       this.offset = offset;
       this.index = index;
       return [next].concat(rest);
@@ -131,7 +141,7 @@ export class OpIterator {
   }
 
   private skipEmpty() {
-    while (this.index < this.ops.length && isEmpty(this.ops[this.index])) {
+    while (this.index < this.ops.length && Op.isEmpty(this.ops[this.index])) {
       this.index += 1;
     }
   }

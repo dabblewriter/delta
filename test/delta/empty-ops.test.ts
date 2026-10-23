@@ -27,8 +27,8 @@ const insert = fc.record(
 const emptyInsert = fc.record({ insert: fc.constant(''), attributes }, { requiredKeys: ['insert'] });
 const empty = fc.oneof(
   emptyInsert,
-  fc.record({ retain: fc.constant(0), attributes: formats }, { requiredKeys: ['retain'] }),
-  fc.constant<Op>({ delete: 0 })
+  fc.record({ retain: fc.integer({ min: -3, max: 0 }), attributes: formats }, { requiredKeys: ['retain'] }),
+  fc.record({ delete: fc.integer({ min: -3, max: 0 }) })
 );
 const length = fc.integer({ min: 1, max: 6 });
 const change = fc.oneof(
@@ -38,14 +38,14 @@ const change = fc.oneof(
   { arbitrary: empty, weight: 2 }
 );
 
-// The same raw ops twice: with zero-length ops scattered through, and without them
+// The same raw ops twice: with ops of no length (zero or negative) scattered through, and without them
 const pair = (ops: Op[]) => ({ dirty: new Delta(ops), clean: new Delta(ops.filter(op => Op.length(op) > 0)) });
-const docs = fc.array(fc.oneof({ arbitrary: insert, weight: 3 }, emptyInsert), { maxLength: 12 }).map(pair);
+const docs = fc.array(fc.oneof({ arbitrary: insert, weight: 3 }, empty), { maxLength: 12 }).map(pair);
 const changes = fc.array(change, { maxLength: 10 }).map(pair);
 
 const runs = { numRuns: 1000 };
 
-describe('zero-length ops', () => {
+describe('ops with no length', () => {
   it('compose() ignores them in either delta', () => {
     fc.assert(
       fc.property(docs, changes, (doc, change) => {
@@ -105,11 +105,22 @@ describe('zero-length ops', () => {
     );
   });
 
-  it('slice() and length() ignore them', () => {
+  it('slice(), length() and changeLength() ignore them', () => {
     fc.assert(
-      fc.property(docs, fc.nat(40), fc.nat(40), (doc, start, end) => {
+      fc.property(docs, changes, fc.nat(40), fc.nat(40), (doc, change, start, end) => {
         expect(doc.dirty.length()).toEqual(doc.clean.length());
+        expect(change.dirty.length()).toEqual(change.clean.length());
+        expect(change.dirty.changeLength()).toEqual(change.clean.changeLength());
         expectSame(doc.dirty.slice(start, end), doc.clean.slice(start, end));
+      }),
+      runs
+    );
+  });
+
+  it('concat() ignores them', () => {
+    fc.assert(
+      fc.property(docs, docs, (a, b) => {
+        expectSame(a.dirty.concat(b.dirty), a.clean.concat(b.clean));
       }),
       runs
     );
@@ -132,6 +143,8 @@ describe('zero-length ops', () => {
       { insert: 'ab' },
       { retain: 0 },
       { delete: 0 },
+      { retain: -2 },
+      { delete: -1 },
       { insert: 'cd' },
       { insert: '' },
     ]);
@@ -144,11 +157,32 @@ describe('zero-length ops', () => {
     expect(iter.hasNext()).toEqual(false);
   });
 
-  it('OpIterator.next(0) consumes nothing', () => {
+  it('OpIterator.next() takes nothing for a length of zero or less', () => {
     const iter = new OpIterator([{ insert: 'ab' }, { delete: 3 }]);
-    expect(Op.length(iter.next(0))).toEqual(0);
+    expect(iter.next(0)).toEqual({ retain: 0 });
+    expect(iter.next(-1)).toEqual({ retain: 0 });
     expect(iter.peekLength()).toEqual(2);
     expect(iter.next()).toEqual({ insert: 'ab' });
+  });
+
+  it('OpIterator.next() takes the rest of the op for a missing or NaN length', () => {
+    for (const length of [undefined, null, NaN]) {
+      const iter = new OpIterator([{ insert: 'abc' }, { delete: 3 }]);
+      iter.next(1);
+      expect(iter.next(length as number)).toEqual({ insert: 'bc' });
+      expect(iter.peekLength()).toEqual(3);
+    }
+  });
+});
+
+describe('a negative-length op', () => {
+  it('does not stop compose() or transform() from finishing', () => {
+    const doc = new Delta([{ insert: 'abc' }]);
+    const change = new Delta([{ retain: 1 }, { retain: -1 }, { delete: 1 }]);
+    expect(doc.compose(change)).toEqual(new Delta([{ insert: 'ac' }]));
+    expect(change.transform(new Delta([{ retain: 2 }, { insert: 'x' }]), true)).toEqual(
+      new Delta([{ retain: 1 }, { insert: 'x' }])
+    );
   });
 });
 

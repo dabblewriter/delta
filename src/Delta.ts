@@ -1,6 +1,6 @@
 import diff from 'fast-diff';
 import AttributeMap from './AttributeMap.js';
-import Op, { isEmpty } from './Op.js';
+import Op, { withoutEmpty } from './Op.js';
 import isEqual from './util/isEqual.js';
 
 const NULL_CHARACTER = String.fromCharCode(0); // Placeholder char for embed in diff()
@@ -52,11 +52,11 @@ export default class Delta {
   }
 
   /**
-   * Zero-length ops are dropped. Others are stored by reference, and `slice`, `compose`, `concat` and the
-   * iterator hand out ops from their inputs, so never mutate an op after pushing it.
+   * Ops with no length (zero, negative or NaN) are dropped. Others are stored by reference, and `slice`,
+   * `compose`, `concat` and the iterator hand out ops from their inputs, so never mutate an op after pushing it.
    */
   push(newOp: Op): this {
-    if (isEmpty(newOp)) {
+    if (Op.isEmpty(newOp)) {
       return this;
     }
     // Normalize: strip empty attributes
@@ -141,7 +141,9 @@ export default class Delta {
 
   changeLength(): number {
     return this.reduce((length, elem) => {
-      if (elem.insert) {
+      if (Op.isEmpty(elem)) {
+        return length;
+      } else if (elem.insert) {
         return length + Op.length(elem);
       } else if (elem.delete) {
         return length - elem.delete;
@@ -152,7 +154,7 @@ export default class Delta {
 
   length(): number {
     return this.reduce((length, elem) => {
-      return length + Op.length(elem);
+      return Op.isEmpty(elem) ? length : length + Op.length(elem);
     }, 0);
   }
 
@@ -230,8 +232,12 @@ export default class Delta {
             otherOp.retain === Infinity ||
             (!otherIter.hasNext() && isEqual(delta.ops[delta.ops.length - 1], newOp))
           ) {
-            const rest = new Delta(thisIter.rest());
-            return delta.concat(rest).chop();
+            const rest = thisIter.rest();
+            if (rest.length > 0) {
+              delta.push(rest[0]);
+              delta.ops = delta.ops.concat(rest.slice(1));
+            }
+            return delta.chop();
           }
 
           // Other op should be delete, we could be an insert or retain
@@ -245,10 +251,11 @@ export default class Delta {
   }
 
   concat(other: Delta): Delta {
-    const delta = new Delta(this.ops.slice());
-    if (other.ops.length > 0) {
-      delta.push(other.ops[0]);
-      delta.ops = delta.ops.concat(other.ops.slice(1));
+    const delta = new Delta(withoutEmpty(this.ops.slice()));
+    const ops = withoutEmpty(other.ops);
+    if (ops.length > 0) {
+      delta.push(ops[0]);
+      delta.ops = delta.ops.concat(ops.slice(1));
     }
     return delta;
   }
@@ -262,6 +269,9 @@ export default class Delta {
         .map(op => {
           if (op.insert != null) {
             return typeof op.insert === 'string' ? op.insert : NULL_CHARACTER;
+          }
+          if (Op.isEmpty(op)) {
+            return '';
           }
           const prep = delta === other ? 'on' : 'with';
           throw new Error('diff() called ' + prep + ' non-document');
@@ -334,7 +344,9 @@ export default class Delta {
   invert(base: Delta): Delta {
     const inverted = new Delta();
     this.reduce((baseIndex, op) => {
-      if (op.insert) {
+      if (Op.isEmpty(op)) {
+        return baseIndex;
+      } else if (op.insert) {
         inverted.delete(Op.length(op));
       } else if (op.retain && op.attributes == null) {
         inverted.retain(op.retain);
