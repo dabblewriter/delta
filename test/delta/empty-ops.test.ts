@@ -13,7 +13,7 @@ const rebuild = (ops: Op[]) =>
   }, new Delta());
 
 function expectSame(actual: Delta, expected: Delta) {
-  expect(actual.ops.filter(op => Op.length(op) <= 0)).toEqual([]);
+  expect(actual.ops.filter(Op.isEmpty)).toEqual([]);
   expect(rebuild(actual.ops)).toEqual(rebuild(expected.ops));
 }
 
@@ -24,24 +24,39 @@ const insert = fc.record(
   { insert: fc.oneof({ arbitrary: text, weight: 4 }, fc.constant({ image: 'x' })), attributes },
   { requiredKeys: ['insert'] }
 );
-const emptyInsert = fc.record({ insert: fc.constant(''), attributes }, { requiredKeys: ['insert'] });
-const empty = fc.oneof(
-  emptyInsert,
-  fc.record({ retain: fc.integer({ min: -3, max: 0 }), attributes: formats }, { requiredKeys: ['retain'] }),
-  fc.record({ delete: fc.integer({ min: -3, max: 0 }) })
-);
 const length = fc.integer({ min: 1, max: 6 });
 const change = fc.oneof(
   { arbitrary: fc.record({ retain: length, attributes: formats }, { requiredKeys: ['retain'] }), weight: 3 },
   { arbitrary: fc.record({ delete: length }), weight: 2 },
-  { arbitrary: insert, weight: 2 },
-  { arbitrary: empty, weight: 2 }
+  { arbitrary: insert, weight: 2 }
 );
 
-// The same raw ops twice: with ops of no length (zero or negative) scattered through, and without them
-const pair = (ops: Op[]) => ({ dirty: new Delta(ops), clean: new Delta(ops.filter(op => Op.length(op) > 0)) });
-const docs = fc.array(fc.oneof({ arbitrary: insert, weight: 3 }, empty), { maxLength: 12 }).map(pair);
-const changes = fc.array(change, { maxLength: 10 }).map(pair);
+// Ops with no valid length. `null` is what NaN becomes after JSON; a null retain or delete beside an insert is ignored
+const badNumber = fc.constantFrom(0, -1, -3, 0.5, 2.5, NaN);
+const noLength = fc.oneof(badNumber, fc.constant(null as unknown as number));
+const junk = fc.oneof(
+  fc.record({ insert: fc.constant(''), attributes }, { requiredKeys: ['insert'] }),
+  fc.record({ retain: noLength, attributes: formats }, { requiredKeys: ['retain'] }),
+  fc.record({ delete: noLength }),
+  fc.record({ insert: text, retain: badNumber }),
+  fc.record({ insert: text, delete: badNumber })
+);
+
+// The same raw ops twice: with junk scattered through, and without it
+const tagged = (op: fc.Arbitrary<Op>) =>
+  fc.array(
+    fc.oneof(
+      { arbitrary: op.map(op => ({ op, junk: false })), weight: 3 },
+      junk.map(op => ({ op: op as Op, junk: true }))
+    ),
+    { maxLength: 12 }
+  );
+const pair = (items: { op: Op; junk: boolean }[]) => ({
+  dirty: new Delta(items.map(item => item.op)),
+  clean: new Delta(items.filter(item => !item.junk).map(item => item.op)),
+});
+const docs = tagged(insert).map(pair);
+const changes = tagged(change).map(pair);
 
 const runs = { numRuns: 1000 };
 
@@ -128,10 +143,10 @@ describe('ops with no length', () => {
 
   it('push() drops them', () => {
     fc.assert(
-      fc.property(fc.array(change, { maxLength: 10 }), ops => {
-        const pushed = ops.reduce((delta, op) => delta.push({ ...op }), new Delta());
-        expect(pushed.ops.filter(op => Op.length(op) <= 0)).toEqual([]);
-        expect(rebuild(pushed.ops)).toEqual(rebuild(ops));
+      fc.property(changes, change => {
+        const pushed = change.dirty.ops.reduce((delta, op) => delta.push({ ...op }), new Delta());
+        expect(pushed.ops.filter(Op.isEmpty)).toEqual([]);
+        expect(rebuild(pushed.ops)).toEqual(rebuild(change.clean.ops));
       }),
       runs
     );
@@ -175,14 +190,30 @@ describe('ops with no length', () => {
   });
 });
 
-describe('a negative-length op', () => {
-  it('does not stop compose() or transform() from finishing', () => {
-    const doc = new Delta([{ insert: 'abc' }]);
-    const change = new Delta([{ retain: 1 }, { retain: -1 }, { delete: 1 }]);
+describe('a malformed op', () => {
+  const doc = new Delta([{ insert: 'abc' }]);
+  const other = new Delta([{ retain: 2 }, { insert: 'y' }]);
+
+  it.each([
+    ['a negative retain', { retain: -1 }],
+    ['an insert with a negative retain', { insert: 'x', retain: -1 }],
+    ['a NaN retain after JSON', JSON.parse(JSON.stringify({ retain: NaN }))],
+    ['a fractional retain', { retain: 0.5 }],
+  ])('is skipped by compose() and transform(): %s', (_, op) => {
+    const change = new Delta([{ retain: 1 }, op, { delete: 1 }]);
     expect(doc.compose(change)).toEqual(new Delta([{ insert: 'ac' }]));
-    expect(change.transform(new Delta([{ retain: 2 }, { insert: 'x' }]), true)).toEqual(
-      new Delta([{ retain: 1 }, { insert: 'x' }])
+    expect(change.transform(other, true)).toEqual(new Delta([{ retain: 1 }, { insert: 'y' }]));
+  });
+
+  it('does not reach a document, so diff() still works', () => {
+    const composed = doc.compose(
+      new Delta(JSON.parse(JSON.stringify([{ retain: 1 }, { retain: NaN }, { delete: 1 }])))
     );
+    expect(composed.diff(doc)).toEqual(new Delta().retain(1).insert('b'));
+  });
+
+  it('does not stop chop() removing a trailing retain', () => {
+    expect(new Delta([{ insert: 'a' }, { retain: 3 }, { retain: 0 }]).chop()).toEqual(new Delta([{ insert: 'a' }]));
   });
 });
 

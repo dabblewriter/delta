@@ -15,25 +15,44 @@ namespace Op {
     return new OpIterator(ops);
   }
 
+  /**
+   * Returns 0 for an op with no valid length: an empty insert, or a retain or delete that is not a whole number
+   * above zero (NaN, null, negative or fractional). Every reader skips such an op.
+   */
   export function length(op: Op): number {
-    if (typeof op.delete === 'number') {
-      return op.delete;
-    } else if (typeof op.retain === 'number') {
-      return op.retain;
+    if (op.delete != null) {
+      return validLength(op.delete);
+    } else if (op.retain != null) {
+      return validLength(op.retain);
+    } else if (typeof op.insert === 'string') {
+      return op.insert.length;
     } else {
-      return typeof op.insert === 'string' ? op.insert.length : 1;
+      return op.insert != null ? 1 : 0;
     }
   }
 
   export function isEmpty(op: Op): boolean {
-    return typeof op.insert === 'string' ? op.insert.length === 0 : !(Op.length(op) > 0);
+    return length(op) === 0;
   }
 }
 
 export default Op;
 
+// Infinity stays valid: the iterator uses `{ retain: Infinity }` for the rest of the document
+function validLength(n: unknown): number {
+  return typeof n === 'number' && n > 0 && (Number.isInteger(n) || n === Infinity) ? n : 0;
+}
+
 export function withoutEmpty(ops: Op[]): Op[] {
-  return ops.some(Op.isEmpty) ? ops.filter(op => !Op.isEmpty(op)) : ops;
+  let kept: Op[] | undefined;
+  ops.forEach((op, i) => {
+    if (Op.isEmpty(op)) {
+      kept ??= ops.slice(0, i);
+    } else {
+      kept?.push(op);
+    }
+  });
+  return kept ?? ops;
 }
 
 export class OpIterator {
